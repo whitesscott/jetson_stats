@@ -128,7 +128,7 @@ def value_to_string(value, unit, type, func):
     value_string = str(value)
     if value >= 100:
         # value_string = value_string.rstrip('0').rstrip('.')
-        value_string = value_string[:3].rstrip('.')
+        value_string = value_string[:4].rstrip('.')
     return "{value}{unit}{type}".format(value=value_string, unit=unit, type=type)
 
 
