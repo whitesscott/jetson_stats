@@ -112,7 +112,6 @@ class JetsonPowerProvider:
         logger.info("JetsonPowerProvider: pylibjetsonpower loaded OK")
         return True
 
-
     def available(self) -> bool:
         return self._ensure_loaded()
 
@@ -407,7 +406,6 @@ class JetsonPowerProvider:
             logger.debug("engine read failed %s: %s", en, e)
             return {"online": False, "cur": None, "min": None, "max": None}
 
-
     def engine_set_max(self, engine_name: str, khz: int) -> Tuple[bool, Optional[str]]:
         if not self.available():
             return False, "pylibjetsonpower unavailable"
@@ -697,6 +695,7 @@ class JetsonPowerProvider:
             try:
                 tot = jp.disk_get_total_size(mp)
                 used = jp.disk_get_used_size(mp)
+
                 def ok(v: int) -> Optional[int]:
                     return v if isinstance(v, int) and v >= 0 else None
                 out[mp] = {"total_mb": ok(tot), "used_mb": ok(used)}
@@ -705,4 +704,3 @@ class JetsonPowerProvider:
         return out
 
 # EOF
-

@@ -129,14 +129,14 @@ def freq_gauge(stdscr, pos_y, pos_x, size, freq_data):
 
     # Pull values
     cur = freq_data.get('cur', None)
-    mn  = freq_data.get('min', None)
-    mx  = freq_data.get('max', None)
+    mn = freq_data.get('min', None)
+    mx = freq_data.get('max', None)
 
     # Try to normalize to integers
     try:
         cur_i = int(cur) if cur is not None else None
-        mn_i  = int(mn)  if mn  is not None else None
-        mx_i  = int(mx)  if mx  is not None else None
+        mn_i = int(mn) if mn is not None else None
+        mx_i = int(mx) if mx is not None else None
     except (TypeError, ValueError):
         cur_i = mn_i = mx_i = None
 
@@ -164,4 +164,3 @@ def freq_gauge(stdscr, pos_y, pos_x, size, freq_data):
 
 
 # EOF
-

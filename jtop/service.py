@@ -86,6 +86,7 @@ JTOP_SERVICE_NAME = 'jtop.service'
 TIMEOUT_GAIN = 3
 TIMEOUT_SWITCHOFF = 3.0
 
+
 def overlay_jetsonpower_flat(
     data: Dict[str, Any],
     jp_power: Optional[Dict[str, Any]],
@@ -696,7 +697,6 @@ class JtopServer(Process):
     def config_clear(self):
         self.config.clear()
 
-
     def apply_jetsonpower_overlay(self, data: Dict[str, Any]) -> None:
         """
         Service-side overlay for JetsonPowerProvider.
@@ -804,4 +804,3 @@ class JtopServer(Process):
             self.sync_event.set()
 
 # EOF
-

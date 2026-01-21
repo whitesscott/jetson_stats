@@ -124,6 +124,8 @@ def _get_flat_stats(stats: dict) -> dict:
     """Return namespaced flat stats dict; fall back to stats for older builds."""
     flat = stats.get("flat")
     return flat if isinstance(flat, dict) else stats
+
+
 def draw_thor_engines_from_stats(stdscr, pos_y, pos_x, width, jetson, stats: dict) -> int:
     """
     Thor Engine Page renderer.
@@ -183,7 +185,6 @@ def draw_thor_engines_from_stats(stdscr, pos_y, pos_x, width, jetson, stats: dic
                 if val > 1000.0:
                     val /= 1000.0
                 rails_w[name] = val
-
 
     preferred = ["VDD_CPU_SOC_MSS", "VDD_GPU", "VIN_SYS_5V0"]
     ordered_names = [r for r in preferred if r in rails_w]
@@ -265,6 +266,8 @@ def draw_thor_engines_from_stats(stdscr, pos_y, pos_x, width, jetson, stats: dic
     return y - pos_y
 
 # Legacy Mapping & Compact View Functions (Required by pall.py)
+
+
 def get_value_engine(engine):
     return unit_to_string(engine['cur'], 'k', 'Hz') if engine['online'] else '[OFF]'
 
