@@ -39,6 +39,9 @@ fi
 
 export PATH="$HOME/.local/bin:$PATH"
 
+# To be safe let's make sure group jtop exists.
+sudo groupadd -f jtop
+
 echo "Creating Python virtual environment in $VENV_DIR..."
 uv venv "$VENV_DIR" -p python3.12 --seed
 
