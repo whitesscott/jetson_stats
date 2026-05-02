@@ -142,7 +142,8 @@ class ProcessService(object):
     def get_status(self):
         total = {}
         table = []
-        uptime = float(open('/proc/uptime', 'r').readline().split()[0])
+        with open('/proc/uptime', 'r') as f:
+            uptime = float(f.readline().split()[0])
         if self._isThor and self._nvml_process_table is not None:
             # nvidia.ko stack (Thor): nvmap absent, NVML gives compute+graphics
             total, raw = self._nvml_process_table()

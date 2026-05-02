@@ -98,32 +98,37 @@ def nvml_process_table() -> Tuple[int, List]:
     try:
         _pynvml.nvmlInit()  # idempotent; required after fork
         count = _pynvml.nvmlDeviceGetCount()
-        pid_mem: Dict[int, int] = {}
-        pid_name: Dict[int, str] = {}
-        for idx in range(count):
-            h = _pynvml.nvmlDeviceGetHandleByIndex(idx)
-            for getter in (
-                _pynvml.nvmlDeviceGetComputeRunningProcesses,
-                _pynvml.nvmlDeviceGetGraphicsRunningProcesses,
-            ):
-                try:
-                    procs = getter(h)
-                except Exception:
-                    continue
-                for p in procs:
-                    mem_kb = (p.usedGpuMemory or 0) // 1024
-                    # max() — same PID in both lists means same allocation
-                    pid_mem[p.pid] = max(pid_mem.get(p.pid, 0), mem_kb)
-                    if p.pid not in pid_name:
-                        try:
-                            pid_name[p.pid] = _pynvml.nvmlSystemGetProcessName(p.pid).split('/')[-1]
-                        except Exception:
-                            pid_name[p.pid] = str(p.pid)
-        total_kb = sum(pid_mem.values())
-        rows = [[str(pid), 'user', pid_name[pid], pid_mem[pid]] for pid in pid_mem]
-        return total_kb, rows
-    except Exception:
+    except _pynvml.NVMLError as e:
+        logger.debug("NVML init/count failed: %s", e)
         return 0, []
+    pid_mem: Dict[int, int] = {}
+    pid_name: Dict[int, str] = {}
+    for idx in range(count):
+        try:
+            h = _pynvml.nvmlDeviceGetHandleByIndex(idx)
+        except _pynvml.NVMLError as e:
+            logger.debug("nvmlDeviceGetHandleByIndex(%d) failed: %s", idx, e)
+            continue
+        for getter in (
+            _pynvml.nvmlDeviceGetComputeRunningProcesses,
+            _pynvml.nvmlDeviceGetGraphicsRunningProcesses,
+        ):
+            try:
+                procs = getter(h)
+            except _pynvml.NVMLError:
+                continue
+            for p in procs:
+                mem_kb = (p.usedGpuMemory or 0) // 1024
+                # max() — same PID in both lists means same allocation
+                pid_mem[p.pid] = max(pid_mem.get(p.pid, 0), mem_kb)
+                if p.pid not in pid_name:
+                    try:
+                        pid_name[p.pid] = _pynvml.nvmlSystemGetProcessName(p.pid).split('/')[-1]
+                    except _pynvml.NVMLError:
+                        pid_name[p.pid] = str(p.pid)
+    total_kb = sum(pid_mem.values())
+    rows = [[str(pid), 'user', pid_name[pid], pid_mem[pid]] for pid in pid_mem]
+    return total_kb, rows
 
 
 def nvml_gpu_used_kb() -> Optional[int]:
