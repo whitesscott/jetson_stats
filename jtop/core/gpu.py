@@ -360,6 +360,8 @@ def nvml_read_gpu_status() -> Dict[str, Dict[str, Any]]:
                     freq_data['max'] = thor_freq['max']
                 # Optionally reflect the real governor; comment the next line to force 'nvml'
                 freq_data['governor'] = thor_freq['governor']
+                # GPC lane meter (Thor has one GPC exposed via devfreq)
+                freq_data['GPC'] = [thor_freq['cur']]
 
             # Add optional fields only if available
             if memory_used is not None:
