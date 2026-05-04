@@ -19,6 +19,7 @@ import re
 import os
 import pwd
 from .common import cat
+from .hw_detect import is_thor
 # Logging
 import logging
 # Create logger
@@ -76,8 +77,15 @@ class ProcessService(object):
         if os.getenv('JTOP_TESTING', False):
             self._root_path = "/fake_sys/kernel"
             logger.warning("Running in JTOP_TESTING folder={root_dir}".format(root_dir=self._root_path))
-        # Check if jetson board
+        # nvmap (nvgpu stack, e.g. Orin): per-process GPU memory via debugfs
         self._isJetson = os.path.isfile(self._root_path + "/debug/nvmap/iovmm/maps")
+        # nvidia.ko stack (Thor): use NVML for per-process GPU memory
+        self._isThor = is_thor()
+        if self._isThor:
+            from .thor_gpu import nvml_process_table
+            self._nvml_process_table = nvml_process_table
+        else:
+            self._nvml_process_table = None
         # Get the clock ticks per second and page size
         self._clk_tck = os.sysconf('SC_CLK_TCK')
         # self._page_size = os.sysconf('SC_PAGE_SIZE')
@@ -134,14 +142,16 @@ class ProcessService(object):
     def get_status(self):
         total = {}
         table = []
-        # Update table
-        if self._isJetson:
-            # Use the memory table to measure
-            total, table = read_process_table(self._root_path + "/debug/nvmap/iovmm/maps")
-
-            uptime = float(open('/proc/uptime', 'r').readline().split()[0])
-
-            table = [self.get_process_info(prc[0], prc[3], prc[2], uptime) for prc in table]
-
+        with open('/proc/uptime', 'r') as f:
+            uptime = float(f.readline().split()[0])
+        if self._isThor and self._nvml_process_table is not None:
+            # nvidia.ko stack (Thor): nvmap absent, NVML gives compute+graphics
+            total, raw = self._nvml_process_table()
+            table = [self.get_process_info(prc[0], prc[3], prc[2], uptime) for prc in raw if prc]
+        elif self._isJetson:
+            # nvgpu stack (Orin): nvmap debugfs is the authoritative source
+            total, raw = read_process_table(self._root_path + "/debug/nvmap/iovmm/maps")
+            table = [self.get_process_info(prc[0], prc[3], prc[2], uptime) for prc in raw]
+        table = [p for p in table if p]
         return total, table
 # EOF

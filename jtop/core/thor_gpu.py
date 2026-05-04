@@ -19,7 +19,22 @@
 
 import logging
 import os
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+# pynvml (nvidia-ml-py) is a declared jetson-stats dependency.
+# NVML is a *management* interface — it reads driver state without creating a
+# CUDA context, so it is safe to call from the jtop service (no host1x/DRM
+# side-effects).
+# NOTE: nvmlInit() is NOT called here at import time.  The jtop service forks
+# a subprocess for monitoring; NVML state does not survive fork, so nvmlInit()
+# must be called lazily inside nvml_process_table() (i.e. in the child process).
+try:
+    import pynvml as _pynvml
+    _NVML = True
+except ImportError:
+    _pynvml = None  # type: ignore
+    _NVML = False
 
 from .common import GenericInterface
 from .exceptions import JtopException
@@ -35,6 +50,10 @@ logger = logging.getLogger(__name__)
 
 # Thor detection: present if the devfreq GPC domain exists
 THOR_GPC = "/sys/class/devfreq/gpu-gpc-0"
+
+# 1-second TTL cache for the NVML process-sum so read_gpu_mem_rows_for_gui()
+# and the memory service don't both call nvml_process_table() on the same tick.
+_GPU_USED_CACHE: Dict[str, Any] = {"ts": 0.0, "kb": None}
 
 
 def _read_memtotal_bytes() -> int:
@@ -59,29 +78,94 @@ def _read_memavailable_bytes() -> int:
     return 0
 
 
+def nvml_process_table() -> Tuple[int, List]:
+    """
+    Return (total_kb, rows) for GPU processes on the nvidia.ko stack (Thor).
+
+    Queries both compute and graphics process lists via pynvml, deduplicating
+    by PID with max() so a process that appears in both lists (common on Thor)
+    is counted once at its peak allocation.
+
+    Row format: [pid_str, 'user', process_name, gpu_mem_kb]
+    This matches read_process_table() so ProcessService can consume it
+    without changes.
+
+    pynvml is a declared jetson-stats dependency and is available in the jtop
+    venv.  NVML does not create a CUDA context — no host1x/DRM side-effects.
+    """
+    if not _NVML:
+        return 0, []
+    try:
+        _pynvml.nvmlInit()  # idempotent; required after fork
+        count = _pynvml.nvmlDeviceGetCount()
+    except _pynvml.NVMLError as e:
+        logger.debug("NVML init/count failed: %s", e)
+        return 0, []
+    pid_mem: Dict[int, int] = {}
+    pid_name: Dict[int, str] = {}
+    for idx in range(count):
+        try:
+            h = _pynvml.nvmlDeviceGetHandleByIndex(idx)
+        except _pynvml.NVMLError as e:
+            logger.debug("nvmlDeviceGetHandleByIndex(%d) failed: %s", idx, e)
+            continue
+        for getter in (
+            _pynvml.nvmlDeviceGetComputeRunningProcesses,
+            _pynvml.nvmlDeviceGetGraphicsRunningProcesses,
+        ):
+            try:
+                procs = getter(h)
+            except _pynvml.NVMLError:
+                continue
+            for p in procs:
+                mem_kb = (p.usedGpuMemory or 0) // 1024
+                # max() — same PID in both lists means same allocation
+                pid_mem[p.pid] = max(pid_mem.get(p.pid, 0), mem_kb)
+                if p.pid not in pid_name:
+                    try:
+                        pid_name[p.pid] = _pynvml.nvmlSystemGetProcessName(p.pid).split('/')[-1]
+                    except _pynvml.NVMLError:
+                        pid_name[p.pid] = str(p.pid)
+    total_kb = sum(pid_mem.values())
+    rows = [[str(pid), 'user', pid_name[pid], pid_mem[pid]] for pid in pid_mem]
+    return total_kb, rows
+
+
+def nvml_gpu_used_kb() -> Optional[int]:
+    """
+    Cached (1-second TTL) sum of GPU process memory from NVML (in kB).
+    Returns None when NVML is unavailable or all processes report 0.
+    """
+    global _GPU_USED_CACHE
+    now = time.monotonic()
+    if now - _GPU_USED_CACHE["ts"] < 1.0:
+        return _GPU_USED_CACHE["kb"]
+    total_kb, _ = nvml_process_table()
+    result = total_kb if total_kb > 0 else None
+    _GPU_USED_CACHE = {"ts": now, "kb": result}
+    return result
+
+
 def read_gpu_mem_rows_for_gui(device_index: int = 0):
     """
     Return a GPU memory summary suitable for the Thor GPU page.
 
-    NOTE: On Thor we intentionally do not call CUDA or NVML from jtop.
-    Any VRAM probing would require creating a CUDA context, which can
-    trigger host1x/DRM activity and syncpoint allocations. We therefore
-    always return VRAM as 0 and only expose Shared System RAM.
+    vram_used_b  — sum of GPU process allocations reported by NVML (bytes).
+    vram_total_b — total system RAM (unified memory; no separate VRAM pool).
+    shared_used_b/shared_total_b — overall system RAM usage (MemAvailable).
     """
-    # VRAM is intentionally not probed on Thor
-    vram_used_b = 0
-    vram_total_b = 0
-
     total_b = _read_memtotal_bytes()
     avail_b = _read_memavailable_bytes()
-    shared_used_b = max(0, total_b - avail_b)  # variable over time
-    shared_total_b = total_b                    # e.g., ~128 GB
+
+    used_kb = nvml_gpu_used_kb()
+    vram_used_b = used_kb * 1024 if used_kb is not None else 0
+    vram_total_b = total_b if _NVML else 0
 
     return {
         "vram_used_b": vram_used_b,
         "vram_total_b": vram_total_b,
-        "shared_used_b": shared_used_b,
-        "shared_total_b": shared_total_b,
+        "shared_used_b": max(0, total_b - avail_b),
+        "shared_total_b": total_b,
     }
 
 
@@ -263,6 +347,7 @@ class GPUService(object):
                 "cur": _mhz(f["cur"]),
                 "max": _mhz(f["max"]),
                 "min": _mhz(f["min"]),
+                "GPC": [_mhz(f["cur"])],
             }
             status = {
                 "load": load,

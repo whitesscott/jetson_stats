@@ -26,6 +26,7 @@ from .processes import read_process_table
 from .engine import read_engine
 from .common import cat, GenericInterface
 from .command import Command
+from .hw_detect import is_thor
 # Create logger
 logger = logging.getLogger(__name__)
 # Memory regular exception
@@ -428,6 +429,8 @@ class MemoryService(object):
         if mem_total:
             # Update shared size
             ram_shared = mem_total if ram_shared == 0 else ram_shared
+        # On Thor (unified memory, no NvMapMemUsed), label as VRAM
+        shared_label = 'VRAM' if is_thor() else 'Shared'
         # Extract memory info
         ram_total = status_mem.get('MemTotal', 0)
         ram_free = status_mem.get('MemFree', 0)
@@ -447,6 +450,7 @@ class MemoryService(object):
             'cached': cached_memory,
             'shared': ram_shared,
             'lfb': large_free_bank,  # In 4MB
+            'shared_label': shared_label,
         }
         # Extract swap numbers
         swap_total = status_mem.get('SwapTotal', 0)

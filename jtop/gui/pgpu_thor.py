@@ -159,15 +159,15 @@ class GPU(Page):
             button_3d_scaling = SmallButton(
                 stdscr, self.action_scaling_3D, info={"name": gpu_name}
             )
-            # Shared-only RAM chart (no VRAM)
+            # RAM chart: grey=system RAM in use, yellow=GPU VRAM (process sum)
             chart_ram = (
                 Chart(
                     jetson,
-                    "GPU Shared RAM",
+                    "GPU VRAM",
                     self.update_chart_ram,
                     type_value=float,
-                    color_text=curses.COLOR_GREEN,
-                    color_chart=[COLOR_GREY, curses.COLOR_GREEN],
+                    color_text=curses.COLOR_YELLOW,
+                    color_chart=[COLOR_GREY, curses.COLOR_YELLOW],
                 )
                 if type_gpu == "i"
                 else None
@@ -197,22 +197,21 @@ class GPU(Page):
 
     def update_chart_ram(self, jetson, name):
         """
-        Shared-only series from system memory (no VRAM line).
-        Assumes read_gpu_mem_rows_for_gui returns bytes.
+        Two series scaled against total system RAM (unified memory on Thor):
+          series 0 (grey)   — total system RAM in use (background context)
+          series 1 (yellow) — GPU VRAM: sum of GPU process allocations via NVML
         """
         rows = read_gpu_mem_rows_for_gui(device_index=0)
         s_used_b = rows.get("shared_used_b", 0)
-        s_total_b = rows.get("shared_total_b", 0)
+        v_used_b = rows.get("vram_used_b", 0)
+        v_total_b = rows.get("vram_total_b", 0) or rows.get("shared_total_b", 0)
 
-        # Chart expects start='k' (kB), so convert bytes -> kB for scaling.
-        max_val_kb = max(s_total_b // 1024, 1)
+        max_val_kb = max(v_total_b // 1024, 1)
         szw, divider_kb, unit = size_min(max_val_kb, start="k")
-
-        # Convert divider (kB) back to bytes for the value division
         divider_bytes = max(divider_kb * 1024, 1)
 
         return {
-            "value": [s_used_b / divider_bytes],  # single-series: Shared only
+            "value": [s_used_b / divider_bytes, v_used_b / divider_bytes],
             "max": szw,
             "unit": unit,
         }
@@ -288,18 +287,18 @@ class GPU(Page):
             chart.draw(self.stdscr, size_x, size_y, label=label_chart_gpu)
 
             if chart_ram:
-                # Compose a clear Shared-only label using kB as base (API expects 'k')
+                # VRAM label: pynvml process sum / total system RAM (unified)
                 rows = read_gpu_mem_rows_for_gui(device_index=0)
-                s_used_b = rows.get("shared_used_b", 0)
-                s_total_b = rows.get("shared_total_b", 0)
+                v_used_b = rows.get("vram_used_b", 0)
+                v_total_b = rows.get("vram_total_b", 0) or rows.get("shared_total_b", 0)
 
                 # Convert bytes -> kB for size_to_string/start='k'
-                s_used_k = max(1, s_used_b // 1024)
-                s_total_k = max(1, s_total_b // 1024)
+                v_used_k = max(1, v_used_b // 1024)
+                v_total_k = max(1, v_total_b // 1024)
 
-                label_mem = "Shared {s_used}/{s_tot}".format(
-                    s_used=size_to_string(s_used_k, "k"),
-                    s_tot=size_to_string(s_total_k, "k"),
+                label_mem = "{v_used}/{v_tot}".format(
+                    v_used=size_to_string(v_used_k, "k"),
+                    v_tot=size_to_string(v_total_k, "k"),
                 )
 
                 chart_ram.draw(
@@ -342,8 +341,16 @@ class GPU(Page):
                 (y, x + len(label), x + len(label) + len(field) - 1)
             )
 
+            x += width // 4
+            power_ctrl = gpu_data.get("power_control", "runtime_pm")
+            try:
+                self.stdscr.addstr(y, x, "Power ctrl: ", curses.A_BOLD)
+                self.stdscr.addstr(y, x + 12, power_ctrl)
+            except curses.error:
+                pass
+
             label_y = first + 1 + (idx + 1) * gpu_height - 1
-            meter_y = label_y - 1
+            meter_y = label_y + 1
 
             # Frequency meters (live row above the 3D/Railgate line)
             frq_size = width - 3
